@@ -69,6 +69,8 @@ func main() {
 	db.InitializeDB("db/characters.db")
 	defer db.CloseDB()
 
+	log.Info("Tournament Mode: %b", bot.IsTournamentMode())
+
 	go startFrontend()
 
 	bot.RunBot()

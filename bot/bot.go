@@ -337,3 +337,19 @@ func ScrapeBalance() string {
 
 	return balance
 }
+
+func IsTournamentMode() bool {
+	c := colly.NewCollector()
+
+	var tournamentMode bool
+
+	c.OnHTML("#tournament", func(e *colly.HTMLElement) {
+		tournamentMode = e.Text == "Tournament Mode"
+	})
+
+	c.Visit("https://www.saltybet.com/")
+
+	c.Wait()
+
+	return tournamentMode
+}
