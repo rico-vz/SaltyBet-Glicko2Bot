@@ -159,7 +159,7 @@
                                         .then(response => response.json())
                                         .then(data => {
                                             // Set the current balance, total bets, and bet winrate
-                                            document.getElementById('currentBalance').textContent = `$${data[data.length - 1].balance}`;
+                                            document.getElementById('currentBalance').textContent = `🧂${data[data.length - 1].balance}`;
                                             document.getElementById('totalBets').textContent = data.length;
                                             const winCount = data.filter(entry => entry.result === 'win').length;
                                             const betWinrate = (winCount / data.length * 100).toFixed(2);
