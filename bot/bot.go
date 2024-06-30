@@ -11,9 +11,11 @@ import (
 	"os"
 	"rico-vz/SaltyBet-Glicko2Bot/db"
 	"rico-vz/SaltyBet-Glicko2Bot/glicko"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/log"
+	"github.com/gocolly/colly/v2"
 )
 
 type SaltyBetState struct {
@@ -35,7 +37,21 @@ type BotState struct {
 	BetAmount  int
 }
 
+type BetState struct {
+	BetAmount    int
+	ChosenNumber string
+}
+
+type BetResult struct {
+	Timestamp time.Time `json:"timestamp"`
+	BetAmount int       `json:"betAmount"`
+	Chosen    string    `json:"chosen"`
+	Result    string    `json:"result"`
+	Balance   string    `json:"balance"`
+}
+
 var botState *BotState
+var betState *BetState
 
 func fetchSaltyBetState() (*SaltyBetState, error) {
 	currentUnixTimestamp := time.Now().Unix()
@@ -95,6 +111,8 @@ func UpdateResults(winner, loser *db.Character) {
 }
 
 func RunBot() {
+	ScrapeBalance()
+
 	var previousHash string
 
 	ticker := time.NewTicker(2 * time.Second)
@@ -166,8 +184,13 @@ func OnStatusOpened(state *SaltyBetState) {
 		db.SaveCharacter(character2)
 	}
 
-	// Choose a character to bet on
 	chosenCharacter := ChooseCharacter(character1, character2)
+	chosenCharacterNum := string(chosenCharacter[len(chosenCharacter)-1])
+
+	betState = &BetState{
+		BetAmount:    botState.BetAmount,
+		ChosenNumber: chosenCharacterNum,
+	}
 
 	// Submit the bet
 	SubmitBet(chosenCharacter, botState.BetAmount)
@@ -177,26 +200,56 @@ func OnStatusOpened(state *SaltyBetState) {
 func OnMatchEnd(state *SaltyBetState) {
 	var winner, loser *db.Character
 	var err error
-	if state.Status == "1" {
-		winner, err = db.GetCharacter(botState.Character1.Name)
-		if err != nil {
-			log.Error("Error getting character from database: ", "error", err)
-		}
 
-		loser, err = db.GetCharacter(botState.Character2.Name)
+	getCharacter := func(name string) (*db.Character, error) {
+		character, err := db.GetCharacter(name)
 		if err != nil {
 			log.Error("Error getting character from database: ", "error", err)
+			return nil, err
+		}
+		return character, nil
+	}
+
+	if state.Status == "1" {
+		winner, err = getCharacter(botState.Character1.Name)
+		if err != nil {
+			return
+		}
+		loser, err = getCharacter(botState.Character2.Name)
+		if err != nil {
+			return
 		}
 	} else {
-		winner, err = db.GetCharacter(botState.Character2.Name)
+		winner, err = getCharacter(botState.Character2.Name)
 		if err != nil {
-			log.Error("Error getting character from database: ", "error", err)
+			return
 		}
+		loser, err = getCharacter(botState.Character1.Name)
+		if err != nil {
+			return
+		}
+	}
 
-		loser, err = db.GetCharacter(botState.Character1.Name)
-		if err != nil {
-			log.Error("Error getting character from database: ", "error", err)
-		}
+	newBalance := ScrapeBalance()
+
+	if state.Status == betState.ChosenNumber {
+		log.Info("Bet won: ", "amount", betState.BetAmount)
+		SaveBetResult(BetResult{
+			Timestamp: time.Now(),
+			BetAmount: betState.BetAmount,
+			Chosen:    betState.ChosenNumber,
+			Result:    "win",
+			Balance:   newBalance,
+		})
+	} else {
+		log.Info("Bet lost: ", "amount", betState.BetAmount)
+		SaveBetResult(BetResult{
+			Timestamp: time.Now(),
+			BetAmount: betState.BetAmount,
+			Chosen:    betState.ChosenNumber,
+			Result:    "loss",
+			Balance:   newBalance,
+		})
 	}
 
 	UpdateResults(winner, loser)
@@ -236,11 +289,51 @@ func SubmitBet(player string, amount int) {
 		return
 	}
 	defer res.Body.Close()
+}
 
-	body, err := io.ReadAll(res.Body)
-	if err != nil {
-		log.Error("Error reading response body: ", "error", err)
-		return
+func SaveBetResult(bet BetResult) error {
+	// PathL ./bet_results.json
+	var betResults []BetResult
+	file, err := os.OpenFile("./bet_results.json", os.O_RDWR|os.O_CREATE, 0644)
+	if err == nil {
+		defer file.Close()
+		json.NewDecoder(file).Decode(&betResults)
+	} else {
+		betResults = []BetResult{}
 	}
-	log.Info("Bet submitted: ", "response", string(body))
+
+	// Append new bet result
+	betResults = append(betResults, bet)
+
+	// Write back to file
+	file, err = os.Create("./bet_results.json")
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	return json.NewEncoder(file).Encode(betResults)
+}
+
+func ScrapeBalance() string {
+	phpSessID := os.Getenv("PHPSESSID")
+	var balance string
+
+	c := colly.NewCollector()
+
+	c.OnHTML("#balance", func(e *colly.HTMLElement) {
+		balance = strings.ReplaceAll(e.Text, ",", "")
+		log.Info("Balance: $" + balance)
+	})
+
+	c.OnRequest(func(r *colly.Request) {
+		log.Info("Visiting: " + r.URL.String())
+		r.Headers.Set("Cookie", "PHPSESSID="+phpSessID)
+	})
+
+	c.Visit("https://www.saltybet.com/")
+
+	c.Wait()
+
+	return balance
 }

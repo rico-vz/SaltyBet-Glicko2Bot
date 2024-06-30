@@ -3,6 +3,8 @@ package db
 import (
 	"database/sql"
 
+	"sort"
+
 	"github.com/charmbracelet/log"
 	_ "modernc.org/sqlite"
 )
@@ -82,4 +84,33 @@ func SaveCharacter(character *Character) error {
 	}
 
 	return nil
+}
+
+type byRatingDesc []Character
+
+func (a byRatingDesc) Len() int           { return len(a) }
+func (a byRatingDesc) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a byRatingDesc) Less(i, j int) bool { return a[i].Rating > a[j].Rating }
+
+func GetAllCharacters() ([]Character, error) {
+	rows, err := database.Query("SELECT name, win_count, loss_count, rating, rd, volatility FROM characters")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var characters []Character
+	for rows.Next() {
+		var character Character
+		err := rows.Scan(&character.Name, &character.WinCount, &character.LossCount, &character.Rating, &character.RD, &character.Volatility)
+		if err != nil {
+			return nil, err
+		}
+		characters = append(characters, character)
+	}
+
+	// Sort characters by rating in descending order before returning
+	sort.Sort(byRatingDesc(characters))
+
+	return characters, nil
 }
