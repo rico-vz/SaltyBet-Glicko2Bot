@@ -292,7 +292,10 @@ func SubmitBet(player string, amount int) {
 }
 
 func SaveBetResult(bet BetResult) error {
-	// PathL ./bet_results.json
+	if IsTournamentMode() {
+		return nil
+	}
+
 	var betResults []BetResult
 	file, err := os.OpenFile("./bet_results.json", os.O_RDWR|os.O_CREATE, 0644)
 	if err == nil {
@@ -341,10 +344,10 @@ func ScrapeBalance() string {
 func IsTournamentMode() bool {
 	c := colly.NewCollector()
 
-	var tournamentMode bool
+	var tournamentMode bool = false
 
-	c.OnHTML("#tournament", func(e *colly.HTMLElement) {
-		tournamentMode = e.Text == "Tournament Mode"
+	c.OnHTML("#tournament-note", func(e *colly.HTMLElement) {
+		tournamentMode = e.Text == "(Tournament Balance)"
 	})
 
 	c.Visit("https://www.saltybet.com/")
