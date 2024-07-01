@@ -6,16 +6,19 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"mime/multipart"
 	"net/http"
 	"os"
 	"rico-vz/SaltyBet-Glicko2Bot/db"
 	"rico-vz/SaltyBet-Glicko2Bot/glicko"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/log"
 	"github.com/gocolly/colly/v2"
+	"golang.org/x/exp/rand"
 )
 
 type SaltyBetState struct {
@@ -53,6 +56,40 @@ type BetResult struct {
 var botState *BotState
 var betState *BetState
 
+var phpSessID string
+var defaultBetAmount int
+var highBetAmount int
+var maxBetAmount int
+
+func SetVarFromEnv() {
+	phpSessID = os.Getenv("PHPSESSID")
+	defaultBetStr := os.Getenv("DEFAULT_BET")
+	highBetStr := os.Getenv("HIGH_BET")
+	maxBetStr := os.Getenv("MAX_BET")
+
+	defaultBetInt, err := strconv.Atoi(defaultBetStr)
+	if err != nil {
+		log.Error("Error converting default bet to int: ", "error", err)
+		defaultBetInt = 100
+	}
+
+	highBetInt, err := strconv.Atoi(highBetStr)
+	if err != nil {
+		log.Error("Error converting high bet to int: ", "error", err)
+		highBetInt = 100
+	}
+
+	maxBetInt, err := strconv.Atoi(maxBetStr)
+	if err != nil {
+		log.Error("Error converting max bet to int: ", "error", err)
+		maxBetInt = 100
+	}
+
+	defaultBetAmount = defaultBetInt
+	highBetAmount = highBetInt
+	maxBetAmount = maxBetInt
+}
+
 func fetchSaltyBetState() (*SaltyBetState, error) {
 	currentUnixTimestamp := time.Now().Unix()
 	resp, err := http.Get(fmt.Sprintf("https://www.saltybet.com/state.json?t=%d", currentUnixTimestamp))
@@ -81,23 +118,71 @@ func hashState(state *SaltyBetState) string {
 }
 
 func ChooseCharacter(character1, character2 *db.Character) string {
-	if character1.Rating != character2.Rating {
-		if character1.Rating > character2.Rating {
-			log.Info("Chosen character: " + character1.Name)
-			return "player1"
+	probability := glicko2WinProbability(character1, character2)
+
+	// Determine the higher probability side
+	var chosenSide string
+	var chosenName string
+	if probability == 0.5 {
+		// Randomly choose a side if probability is exactly 0.5 (most likely first time we see the characters)
+		rand.Seed(uint64(time.Now().UnixNano()))
+		if rand.Intn(2) == 0 {
+			chosenSide = "player1"
+			chosenName = character1.Name
 		} else {
-			log.Info("Chosen character: " + character2.Name)
-			return "player2"
+			chosenSide = "player2"
+			chosenName = character2.Name
+		}
+	} else if probability > 0.5 {
+		chosenSide = "player1"
+		chosenName = character1.Name
+	} else {
+		chosenSide = "player2"
+		chosenName = character2.Name
+		probability = 1 - probability // Make probability always > 0.5 for our bet amount calculation
+	}
+
+	// Adjust bet amount based on probability
+	if probability > 0.85 {
+		log.Info("High probability, max bet: ", "probability", probability)
+		botState.BetAmount = maxBetAmount
+	} else if probability > 0.7 {
+		log.Info("Medium probability, higher bet: ", "probability", probability)
+		rand.Seed(uint64(time.Now().UnixNano()))
+		botState.BetAmount = rand.Intn(maxBetAmount-highBetAmount+1) + highBetAmount
+	} else if probability > 0.6 {
+		log.Info("Meh probability, high bet: ", "probability", probability)
+		botState.BetAmount = highBetAmount
+	} else {
+		botState.BetAmount = defaultBetAmount
+	}
+
+	if character1.Rating == 1500 || character2.Rating == 1500 {
+		if character1.Rating > 1750 || character2.Rating > 1750 {
+			log.Info("One of the characters has >1750 rating, max bet. ", "probability", probability)
+			botState.BetAmount = maxBetAmount
+		} else {
+			log.Info("One of the characters has 1500 rating, default bet. ", "probability", probability)
+			botState.BetAmount = defaultBetAmount
 		}
 	}
 
-	if len(character1.Name) > len(character2.Name) {
-		log.Info("Chosen character: " + character1.Name)
-		return "player1"
+	log.Info("Betting 🧂" + strconv.Itoa(botState.BetAmount) + " on " + chosenName + " with a probability of " + fmt.Sprintf("%.2f", probability))
+	return chosenSide
+}
+
+func glicko2WinProbability(player1, player2 *db.Character) float64 {
+	q := math.Ln10 / 400
+
+	g := func(rd float64) float64 {
+		return 1 / math.Sqrt(1+3*q*q*rd*rd/math.Pi/math.Pi)
 	}
 
-	log.Info("Chosen character: " + character2.Name)
-	return "player2"
+	E := func(r, r_j, RD_j float64) float64 {
+		return 1 / (1 + math.Exp(-g(RD_j)*(r-r_j)/400))
+	}
+
+	return E(player1.Rating, player2.Rating, player2.RD)
 }
 
 func UpdateResults(winner, loser *db.Character) {
@@ -111,6 +196,7 @@ func UpdateResults(winner, loser *db.Character) {
 }
 
 func RunBot() {
+	SetVarFromEnv()
 	ScrapeBalance()
 
 	var previousHash string
@@ -143,7 +229,7 @@ func OnStateChange(state *SaltyBetState) {
 		botState = &BotState{
 			Character1: &db.Character{Name: state.P1Name, Rating: 1500, RD: 200, Volatility: 0.06},
 			Character2: &db.Character{Name: state.P2Name, Rating: 1500, RD: 200, Volatility: 0.06},
-			BetAmount:  100,
+			BetAmount:  defaultBetAmount,
 		}
 		OnStatusOpened(state)
 		return
@@ -163,12 +249,11 @@ func OnStateChange(state *SaltyBetState) {
 }
 
 func OnStatusOpened(state *SaltyBetState) {
-	// Logic to execute when the status transitions to 'open'
 	// Store the current state in the bot state
 	botState = &BotState{
 		Character1: &db.Character{Name: state.P1Name, Rating: 1500, RD: 200, Volatility: 0.06},
 		Character2: &db.Character{Name: state.P2Name, Rating: 1500, RD: 200, Volatility: 0.06},
-		BetAmount:  100,
+		BetAmount:  defaultBetAmount,
 	}
 
 	// Load the characters from the database
@@ -256,8 +341,6 @@ func OnMatchEnd(state *SaltyBetState) {
 }
 
 func SubmitBet(player string, amount int) {
-	phpSessID := os.Getenv("PHPSESSID")
-
 	log.Info("Submitting bet: ", "player", player, "amount", amount)
 
 	url := "https://www.saltybet.com/ajax_place_bet.php"
@@ -319,7 +402,6 @@ func SaveBetResult(bet BetResult) error {
 }
 
 func ScrapeBalance() string {
-	phpSessID := os.Getenv("PHPSESSID")
 	var balance string
 
 	c := colly.NewCollector()
