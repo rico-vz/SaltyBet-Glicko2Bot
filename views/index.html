@@ -108,6 +108,7 @@
                                 <h6
                                     class="block antialiased tracking-normal font-sans text-base font-semibold leading-relaxed text-blue-gray-900 mb-1">
                                     Bet Results</h6>
+                                    <h7 class="block antialiased tracking-tight font-sans text-sm">Tournament mode results are not recorded.</h7>
                             </div>
                         </div>
                         <div class="p-6 px-0 pt-0 pb-2">
@@ -175,6 +176,38 @@
                                 setInterval(fetchBetResults, 60000); // Refresh the data every minute
                             </script>
                         </div>
+                    </div>
+                    <div
+                        class="relative flex flex-col bg-clip-border rounded-xl bg-white text-gray-700 shadow-md overflow-hidden px-2">
+                        <div
+                            class="relative bg-clip-border rounded-xl overflow-hidden bg-transparent text-gray-700 shadow-none m-0 flex items-center justify-between p-6">
+                            <div>
+                                <h6
+                                    class="block antialiased tracking-normal font-sans text-base font-semibold leading-relaxed text-blue-gray-900 mb-1">
+                                    Stream</h6>
+                                <h7 class="block antialiased tracking-tight font-sans text-sm">We have bet 🧂<span
+                                        id="streamBetAmount">165</span> on <span id="streamBetPlayer">Dazai</span></h7>
+                            </div>
+                        </div>
+                        <div class="p-6 px-0 pt-0 pb-2 h-full">
+                            <iframe src="https://player.twitch.tv/?channel=saltybet&parent=127.0.0.1" height="100%"
+                                width="100%" scrolling="no" frameborder="0" allowfullscreen="false" muted="true"
+                                controls="false" class="rounded-2xl antialiased">
+                            </iframe>
+                        </div>
+                        <script>
+                            function fetchStreamBet() {
+                                fetch('/api/botstate')
+                                    .then(response => response.json())
+                                    .then(data => {
+                                        document.getElementById('streamBetAmount').textContent = data.betAmount;
+                                        document.getElementById('streamBetPlayer').textContent = data.chosen;
+                                    });
+                            }
+
+                            fetchStreamBet();
+                            setInterval(fetchStreamBet, 8000); 
+                        </script>
                     </div>
                 </div>
             </div>

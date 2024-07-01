@@ -60,6 +60,21 @@ func startFrontend() {
 		}
 		w.Write(charactersBytes)
 	})
+
+	// /api/botstate returns bot.GetBotState()
+	http.HandleFunc("/api/botstate", func(w http.ResponseWriter, r *http.Request) {
+		botState := bot.GetBotState()
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		botStateBytes, err := json.Marshal(botState)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Write(botStateBytes)
+	})
+
 	http.ListenAndServe(":5807", nil)
 }
 

@@ -277,7 +277,6 @@ func OnStatusOpened(state *SaltyBetState) {
 		ChosenNumber: chosenCharacterNum,
 	}
 
-	// Submit the bet
 	SubmitBet(chosenCharacter, botState.BetAmount)
 
 }
@@ -379,12 +378,18 @@ func SaveBetResult(bet BetResult) error {
 		return nil
 	}
 
+	if bet.Balance == "1250" {
+		log.Info("Balance is $1250, not saving bet result (probably tournament mode start)")
+		return nil
+	}
+
 	var betResults []BetResult
 	file, err := os.OpenFile("./bet_results.json", os.O_RDWR|os.O_CREATE, 0644)
 	if err == nil {
 		defer file.Close()
 		json.NewDecoder(file).Decode(&betResults)
 	} else {
+		log.Error("Error opening file: ", "error", err)
 		betResults = []BetResult{}
 	}
 
@@ -394,6 +399,7 @@ func SaveBetResult(bet BetResult) error {
 	// Write back to file
 	file, err = os.Create("./bet_results.json")
 	if err != nil {
+		log.Error("Error creating file: ", "error", err)
 		return err
 	}
 	defer file.Close()
@@ -435,4 +441,28 @@ func IsTournamentMode() bool {
 		strings.HasPrefix(state.Remaining, "FINAL ROUND!") ||
 		(!strings.HasSuffix(state.Remaining, "next tournament!") &&
 			!strings.HasPrefix(state.Remaining, "Tournament mode will be activated after the next"))
+}
+
+func GetBotState() json.RawMessage {
+	var chosenCharacterName string
+	if betState.ChosenNumber == "1" {
+		chosenCharacterName = botState.Character1.Name
+	} else {
+		chosenCharacterName = botState.Character2.Name
+	}
+
+	botStateJSON, err := json.Marshal(struct {
+		BetAmount int    `json:"betAmount"`
+		Chosen    string `json:"chosen"`
+	}{
+		BetAmount: botState.BetAmount,
+		Chosen:    chosenCharacterName,
+	})
+
+	if err != nil {
+		log.Error("Error marshalling bot state: ", "error", err)
+		return nil
+	}
+
+	return botStateJSON
 }
