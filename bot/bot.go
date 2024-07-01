@@ -424,17 +424,15 @@ func ScrapeBalance() string {
 }
 
 func IsTournamentMode() bool {
-	c := colly.NewCollector()
+	state, err := fetchSaltyBetState()
+	if err != nil {
+		log.Error("Error fetching state: ", "error", err)
+		return false
+	}
 
-	var tournamentMode bool = false
-
-	c.OnHTML("#tournament-note", func(e *colly.HTMLElement) {
-		tournamentMode = e.Text == "(Tournament Balance)"
-	})
-
-	c.Visit("https://www.saltybet.com/")
-
-	c.Wait()
-
-	return tournamentMode
+	return state.Alert == "Tournament mode start!" ||
+		strings.HasSuffix(state.Remaining, "in the bracket!") ||
+		strings.HasPrefix(state.Remaining, "FINAL ROUND!") ||
+		(!strings.HasSuffix(state.Remaining, "next tournament!") &&
+			!strings.HasPrefix(state.Remaining, "Tournament mode will be activated after the next"))
 }
