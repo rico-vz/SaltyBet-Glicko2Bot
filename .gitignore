@@ -25,3 +25,5 @@ go.work.sum
 .env
 .env.production
 bet_results.json
+
+*.7z
